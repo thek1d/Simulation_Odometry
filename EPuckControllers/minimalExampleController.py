@@ -24,16 +24,39 @@ def calculateValues(goal, act):
 
 def calculateWheelspeed(constants, goal, act):
     
-    r = 0.04/2
-    l = 0.0541
-    
     rho, alpha, beta = calculateValues(goal, act)
     vel = np.matmul(np.array([[constants['k_rho']/r, constants['k_alpha']*l/r, constants['k_beta']*l/r],
-                               [constants['k_rho']/r, -constants['k_alpha']*l/r, -constants['k_beta']*l/r ]
-                               ]), 
-                    np.array([[rho],[alpha],[beta]]) )
+                              [constants['k_rho']/r, -constants['k_alpha']*l/r, -constants['k_beta']*l/r]]), 
+                    np.array([[rho],[alpha],[beta]], dtype=object))
     
     return vel
+
+def nextPointOdometry(actPose, wheelparameter):
+    
+    theta = 2
+    wheelEncoderLeft.append(wheelparameter[0])
+    wheelEncoderRight.append(wheelparameter[1])
+    
+    if step == 0:
+        delta_sr = delta_sl = delta_theta = 0
+        
+    else:
+        delta_sr     = r * abs(wheelEncoderRight[step] - wheelEncoderRight[step-1]) 
+        delta_sl     = r * abs(wheelEncoderLeft[step] - wheelEncoderLeft[step-1])
+        delta_theta  = (delta_sr - delta_sl) / l
+    
+    delta_s = (delta_sr + delta_sl) * .5
+    
+    diffPose = np.array([[delta_s*np.cos(actPose[theta]+delta_theta/2)],
+                         [delta_s*np.sin(actPose[theta]+delta_theta/2)],
+                         [delta_theta]])
+      
+    nextPoint = np.add(np.array([[actPose[0]],
+                                 [actPose[1]],
+                                 [actPose[2]]]), diffPose)
+    
+    return nextPoint
+
 
 def calculateMotorValues(goal, act, constants, odometry, wheelparameter):
     """
@@ -60,36 +83,24 @@ def calculateMotorValues(goal, act, constants, odometry, wheelparameter):
     return velLeft, velRight
 
 
-def nextPointOdometry(actPose, wheelparameter):
-    
-    wheelEncoderLeft.append(wheelparameter[0])
-    wheelEncoderRight.append(wheelparameter[1])
-    
-    theta = 2
-    r     = 0.04/2
-    
-    if step == 0:
-        delta_sr = delta_sl = delta_theta = 0
-        
-    else:
-        delta_sr     = r * abs(wheelEncoderRight[step] - wheelEncoderRight[step-1]) 
-        delta_sl     = r * abs(wheelEncoderLeft[step] - wheelEncoderLeft[step-1])
-        delta_theta  = (delta_sr - delta_sl) / (2*r)
-    
-    delta_s = (delta_sr + delta_sl) * .5
-    
-    diffPose = np.array([[delta_s*np.cos(actPose[theta]+delta_theta/2)],
-                         [delta_s*np.sin(actPose[theta]+delta_theta/2)],
-                         [delta_theta]])
-      
-    nextPoint = np.add(np.array([[actPose[0]],
-                                 [actPose[1]],
-                                 [actPose[2]]]), diffPose)
-    
-    return nextPoint
-
-
 def main():
+    ''' If you want drive with odometry set it to true in
+    in the calculateMotorValues Method'''
+    
+    global wheelEncoderRight, wheelEncoderLeft, step, r, l
+    
+    #startpos = [0.5, .5, 0.0]
+    goal = [1.225, 0.0, 0.0]                
+    
+    constants = {'k_rho'  :  0.05,          # p-Anteil ?
+                 'k_beta' : +0.01,          # d-Anteil ?
+                 'k_alpha': -0.1}           # i-Anteil ?
+    
+    step              =  0
+    wheelEncoderRight = list()
+    wheelEncoderLeft  = list()
+    r                 = 0.04/2
+    l                 = 0.0541
             
     robot = EPuckVRep('ePuck', port=19999, synchronous=False)
 
@@ -98,19 +109,6 @@ def main():
     robot.setSensesAllTogether(False)  # we want fast sensing, so set robot to sensing mode where all sensors are sensed
 
     noDetectionDistance = 0.05 * robot.getS()  # maximum distance that proximity sensors of ePuck may sense
-    
-    global wheelEncoderRight, wheelEncoderLeft, step
-    
-    step              =  0
-    wheelEncoderRight = list()
-    wheelEncoderLeft  = list()
-    
-    #startpos = [0.5, .5, 0.0]
-    goal = [1.225, 0.0, 0.0]                # wieso x so genau?
-    
-    constants = {'k_rho'  :  0.05,          # p-Anteil ?
-                 'k_beta' : +0.01,          # d-Anteil ?
-                 'k_alpha': -0.1}           # i-Anteil ?
     
     # main sense-act cycle
     while robot.isConnected():
@@ -126,14 +124,12 @@ def main():
         # sense
         #distVector = robot.getProximitySensorValues()
         
-        wheelEncodingValues = robot.getWheelEncoderValues()
-
         # plan
         leftMotor, rightMotor = calculateMotorValues(goal           = goal,
                                                      act            = robot.getPose(), 
-                                                     wheelparameter = wheelEncodingValues, 
+                                                     wheelparameter = robot.getWheelEncoderValues(), 
                                                      constants      = constants,
-                                                     odometry       = True)
+                                                     odometry       = False)
 
         # act
         robot.setMotorSpeeds(leftMotor, rightMotor)
